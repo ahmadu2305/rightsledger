@@ -136,6 +136,14 @@ Media rights statements and distributor play counts frequently ingest untrusted 
 
 ---
 
+## 🔬 Related Work & Inspiration
+
+RightsLedger's "Prompt Injection Defense by Design" architecture (instruction/data isolation, deterministic policy gating, structured output validation) draws on *CaMeL: Defeating Prompt Injections by Design* (Debenedetti et al., Google DeepMind / Google / ETH Zurich), which I learned about through an Agentic AI Foundation (AAIF) MLOps webinar. Their core insight—that an LLM should reason and recommend, but a deterministic system must remain the authority for consequential actions—directly shaped the Policy Gate design between Gemini's reasoning and any ClickHouse write.
+
+* **Reference:** [google-research/camel-prompt-injection](https://github.com/google-research/camel-prompt-injection)
+
+---
+
 ## 🧪 Running the Test Suite
 
 RightsLedger includes a comprehensive test suite covering normal reconciliation, underpayments, overpayments, malicious title injections, unauthorized action suppression, and SQL allowlist enforcement:
