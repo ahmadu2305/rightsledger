@@ -18,22 +18,22 @@ In the media, entertainment, and streaming distribution ecosystem, rights holder
 
 ```mermaid
 graph TD
-    User["Catalog Manager / Accountant UI"] -->|Trigger Audit| FastAPI["FastAPI Backend (/api/reconcile)"]
-    FastAPI -->|Async Task| Agent["RightsLedger Agent (agent.py)"]
+    User["Catalog Manager / Accountant UI"] -->|"Trigger Audit"| FastAPI["FastAPI Backend (/api/reconcile)"]
+    FastAPI -->|"Async Task"| Agent["RightsLedger Agent (agent.py)"]
     
     subgraph "Google Cloud / GenAI Runtime"
-        Agent -->|1. Prompt + Telemetry Delta| Gemini["Gemini 3.6 Flash (google-genai)"]
-        Gemini -->|2. Structured Reasoning + Dispute Drafts| Agent
+        Agent -->|"1. Prompt + Telemetry Delta"| Gemini["Gemini 3.6 Flash (google-genai)"]
+        Gemini -->|"2. Structured Reasoning + Dispute Drafts"| Agent
     end
 
     subgraph "Model Context Protocol Boundary"
-        Agent -->|Spawn Subprocess (stdio)| MCP["mcp-clickhouse (Official MCP Server)"]
+        Agent -->|"Spawn Subprocess (stdio)"| MCP["mcp-clickhouse (Official MCP Server)"]
     end
 
     subgraph "ClickHouse Cloud Cluster (rightsledger-dev)"
-        MCP -->|Tool Call: run_query (Read JOIN)| CH[(ClickHouse Cloud)]
-        CH -->|Return Mismatched Rows| MCP
-        MCP -->|Tool Call: run_query (Writeback Audit)| CH
+        MCP -->|"Tool Call: run_query (Read JOIN)"| CH[(ClickHouse Cloud)]
+        CH -->|"Return Mismatched Rows"| MCP
+        MCP -->|"Tool Call: run_query (Writeback Audit)"| CH
     end
 
     style MCP fill:#38bdf8,stroke:#0f172a,stroke-width:2px,color:#0f172a
