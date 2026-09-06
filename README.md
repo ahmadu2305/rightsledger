@@ -166,3 +166,17 @@ OK
 ## 📜 License
 
 Distributed under the Apache-2.0 License. See `LICENSE` for details.
+---
+
+## 🔬 Related Work & Inspiration
+
+RightsLedger's "Prompt Injection Defense by Design" architecture (instruction/data
+isolation, deterministic policy gating, structured output validation) draws on
+CaMeL: Defeating Prompt Injections by Design (Debenedetti et al., Google DeepMind
+/ Google / ETH Zurich), which I learned about through an Agentic AI Foundation
+(AAIF) MLOps webinar. Their core insight — that an LLM should reason and
+recommend, but a deterministic system must remain the authority for consequential
+actions — directly shaped the Policy Gate design between Gemini's reasoning and
+any ClickHouse write.
+
+Reference: https://github.com/google-research/camel-prompt-injection
