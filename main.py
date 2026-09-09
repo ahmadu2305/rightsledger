@@ -512,9 +512,9 @@ def home():
                     <div class="metric-sub">Threshold > 2% variance</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-label">Net Unrecovered Revenue</div>
+                    <div class="metric-label">Net Shortfall</div>
                     <div class="metric-value" id="m-leakage" style="color: #f87171;">$0.00</div>
-                    <div class="metric-sub">Distributor Underpayments</div>
+                    <div class="metric-sub" id="m-leakage-sub">Underpayments minus Overpayments</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Security Gate Defense</div>
@@ -523,8 +523,8 @@ def home():
                 </div>
                 <div class="metric-card">
                     <div class="metric-label">Audit Trail Writeback</div>
-                    <div class="metric-value" id="m-audit" style="color: #38bdf8;">100%</div>
-                    <div class="metric-sub">Persisted via MCP to ClickHouse</div>
+                    <div class="metric-value" id="m-audit" style="color: #38bdf8;">0/0</div>
+                    <div class="metric-sub" id="m-audit-sub">Persisted via MCP to ClickHouse</div>
                 </div>
             </div>
 
@@ -642,18 +642,26 @@ def home():
                     const payload = typeof data.agent_output === 'string' ? JSON.parse(data.agent_output) : data.agent_output;
                     const items = payload.discrepancies || (Array.isArray(payload) ? payload : []);
                     const securityEvents = payload.security_events || [];
-                    
-                    // Render Metrics
-                    let netLeakage = 0;
-                    items.forEach(item => {
-                        if (item.delta < 0) netLeakage += Math.abs(item.delta);
-                    });
+                    const blockedActions = payload.blocked_actions || [];
+                    const financialSummary = payload.financial_summary || {};
+                    const writebackSummary = payload.writeback_summary || {};
+
+                    // Render Metrics using backend-calculated, non-hardcoded values
+                    const totalUnderpayments = financialSummary.total_underpayments ?? 0;
+                    const totalOverpayments = financialSummary.total_overpayments ?? 0;
+                    const netShortfall = financialSummary.net_shortfall ?? 0;
 
                     document.getElementById('m-flagged').innerText = items.length;
-                    document.getElementById('m-leakage').innerText = formatCurrency(netLeakage);
-                    
-                    if (securityEvents.length > 0) {
-                        document.getElementById('m-security').innerText = `${securityEvents.length} BLOCKED`;
+                    document.getElementById('m-leakage').innerText = formatCurrency(netShortfall);
+                    document.getElementById('m-leakage-sub').innerText =
+                        `Underpayments ${formatCurrency(totalUnderpayments)} minus Overpayments ${formatCurrency(totalOverpayments)}`;
+
+                    const injectionBlocks = blockedActions.filter(
+                        b => b.reason && b.reason.toLowerCase().includes('injection')
+                    );
+
+                    if (injectionBlocks.length > 0) {
+                        document.getElementById('m-security').innerText = `${injectionBlocks.length} BLOCKED`;
                         document.getElementById('m-security').style.color = '#ef4444';
                         document.getElementById('m-security-sub').innerText = 'Prompt Injection Neutralized';
                     } else {
@@ -661,6 +669,14 @@ def home():
                         document.getElementById('m-security').style.color = '#10b981';
                         document.getElementById('m-security-sub').innerText = 'All Untrusted Data Validated';
                     }
+
+                    const insertedThisRun = writebackSummary.inserted_this_run ?? 0;
+                    const totalAuthorized = writebackSummary.total_authorized ?? items.length;
+                    document.getElementById('m-audit').innerText = `${insertedThisRun}/${totalAuthorized}`;
+                    document.getElementById('m-audit-sub').innerText =
+                        insertedThisRun === 0 && totalAuthorized > 0
+                            ? 'All records already persisted (no new writes this run)'
+                            : 'New records persisted via MCP to ClickHouse this run';
 
                     metricsSection.style.display = 'grid';
 
@@ -711,7 +727,6 @@ def home():
                                         <span class="tag">Distributor: <strong>${item.distributor}</strong></span>
                                         <span class="tag">Period: ${item.period_start} → ${item.period_end}</span>
                                         ${item.confidence ? `<span class="tag" style="color: #38bdf8;">Confidence: ${(item.confidence * 100).toFixed(0)}%</span>` : ''}
-                                        ${isAttackItem ? `<span class="tag" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; font-weight: 600;">🛡️ Defense Verified</span>` : ''}
                                     </div>
                                 </div>
                                 <span class="badge-type ${badgeClass}">${item.discrepancy_type}</span>

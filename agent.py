@@ -71,6 +71,29 @@ async def execute_safe_mcp_query(session: ClientSession, query: str) -> str:
     return mcp_result.content[0].text if hasattr(mcp_result, 'content') and mcp_result.content else str(mcp_result)
 
 
+async def record_exists(session: ClientSession, table: str, record_id: str) -> bool:
+    """
+    Idempotency check: queries whether a record with the given id already
+    exists in the target table before insertion, to prevent duplicate rows
+    on repeated reconciliation runs.
+    """
+    check_sql = f"SELECT count() FROM {table} WHERE id = '{record_id}'"
+    try:
+        result_raw = await execute_safe_mcp_query(session, check_sql)
+        parsed = json.loads(result_raw)
+        if isinstance(parsed, dict):
+            rows = parsed.get("rows") or parsed.get("data") or []
+            if rows:
+                return int(rows[0][0]) > 0
+        elif isinstance(parsed, list) and parsed:
+            first = parsed[0]
+            val = list(first.values())[0] if isinstance(first, dict) else first[0]
+            return int(val) > 0
+    except Exception as e:
+        logger.warning(f"Could not parse existence check for {record_id} in {table}: {e}. Raw: {result_raw if 'result_raw' in locals() else 'N/A'}")
+    return False
+
+
 # =====================================================================
 # 3. Deterministic Security & Policy Gate
 # =====================================================================
@@ -148,11 +171,21 @@ def deterministic_policy_gate(
                 "flags": detected_flags,
                 "action_taken": "Injection command neutralized. Deterministic financial ground truth enforced."
             })
+            # Req #2 fix: injection detections must also surface in blocked_actions,
+            # not only in security_events, so the two stay consistent.
+            blocked_actions.append({
+                "id": rec_id,
+                "reason": f"{len(detected_flags)} injection attempt(s) detected and ignored; embedded instruction not executed."
+            })
 
         # 5. Build AUTHORIZED record: Financial values are 100% deterministic ground truth
+        raw_title = gt.get("title", "")
+        clean_title = raw_title.split(" -- ")[0].strip() if " -- " in raw_title else raw_title
+
         authorized_records.append({
             "id": rec_id,
-            "title": gt.get("title"),
+            "title": clean_title,
+            "raw_title": raw_title,
             "distributor": gt.get("distributor"),
             "period_start": str(gt.get("period_start")),
             "period_end": str(gt.get("period_end")),
@@ -357,8 +390,15 @@ async def run_reconciliation() -> str:
                 gate_result = deterministic_policy_gate(parsed_recommendations, ground_truth_records)
                 logger.info(f"Policy Gate: {len(gate_result.authorized_records)} authorized, {len(gate_result.blocked_actions)} blocked, {len(gate_result.security_events)} security events.")
 
-                # 5. Tool-Gated Writeback: Only authorized, ground-truth locked records are committed
+                # 5. Tool-Gated Writeback: Only authorized, ground-truth locked records are committed.
+                # Idempotency check (Req #5 & #8): skip insert if the record already exists,
+                # preventing duplicate rows from accumulating on repeated reconciliation runs.
+                inserted_count = 0
                 for item in gate_result.authorized_records:
+                    already_exists = await record_exists(session, "discrepancies", item['id'])
+                    if already_exists:
+                        logger.info(f"Skipping insert for {item['id']} — record already exists in ClickHouse.")
+                        continue
                     clean_expl = item['explanation'].replace("'", "''")
                     clean_draft = item['resolution_draft'].replace("'", "''")
                     insert_sql = f"""
@@ -366,13 +406,32 @@ async def run_reconciliation() -> str:
                     VALUES ('{item['id']}', '{item['title'].replace("'", "''")}', '{item['distributor'].replace("'", "''")}', '{item['period_start']}', '{item['period_end']}', {item['reported_payout']}, {item['expected_payout']}, {item['delta']}, '{item['discrepancy_type']}', '{clean_expl}', '{clean_draft}');
                     """
                     await execute_safe_mcp_query(session, insert_sql)
+                    inserted_count += 1
+
+                logger.info(f"Writeback complete: {inserted_count} new record(s) inserted, {len(gate_result.authorized_records) - inserted_count} already existed and were skipped.")
+
+                # Req #1: Dynamic financial summary — calculated from actual authorized records,
+                # never hardcoded, with net_shortfall correctly offsetting overpayments.
+                total_underpayments = sum(abs(r["delta"]) for r in gate_result.authorized_records if r["delta"] < 0)
+                total_overpayments = sum(r["delta"] for r in gate_result.authorized_records if r["delta"] > 0)
+                net_shortfall = total_underpayments - total_overpayments
 
                 # Return structured payload including security gate telemetry
                 final_output = {
                     "discrepancies": gate_result.authorized_records,
                     "blocked_actions": gate_result.blocked_actions,
                     "security_events": gate_result.security_events,
-                    "policy_gate_status": "ENFORCED"
+                    "policy_gate_status": "ENFORCED",
+                    "financial_summary": {
+                        "total_underpayments": total_underpayments,
+                        "total_overpayments": total_overpayments,
+                        "net_shortfall": net_shortfall
+                    },
+                    "writeback_summary": {
+                        "inserted_this_run": inserted_count,
+                        "already_existing_skipped": len(gate_result.authorized_records) - inserted_count,
+                        "total_authorized": len(gate_result.authorized_records)
+                    }
                 }
 
                 return json.dumps(final_output, indent=2)
